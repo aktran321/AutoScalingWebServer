@@ -96,3 +96,14 @@ resource "aws_security_group" "web" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
+# EC2 User Data Script
+data "template_file" "userdata" {
+  template = <<-EOF
+              #!/bin/bash
+              yum update -y
+              yum install -y httpd
+              systemctl start httpd
+              systemctl enable httpd
+              echo "Hello World from $(hostname -f)" > /var/www/html/index.html
+            EOF
+}
