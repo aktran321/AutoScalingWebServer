@@ -82,6 +82,7 @@ resource "aws_route_table_association" "public_3" {
 resource "aws_security_group" "web" {
   vpc_id = aws_vpc.example.id
 
+  # Allow inbound HTTP traffic
   ingress {
     from_port   = 80
     to_port     = 80
@@ -89,6 +90,15 @@ resource "aws_security_group" "web" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # Allow inbound SSH traffic
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Allow all outbound traffic
   egress {
     from_port   = 0
     to_port     = 0
@@ -96,6 +106,61 @@ resource "aws_security_group" "web" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
+
+# Network ACL
+resource "aws_network_acl" "web_acl" {
+  vpc_id = aws_vpc.example.id
+  subnet_ids = [
+    aws_subnet.public_1.id,
+    aws_subnet.public_2.id,
+    aws_subnet.public_3.id,
+    aws_subnet.private_1.id,
+    aws_subnet.private_2.id,
+    aws_subnet.private_3.id
+  ]
+
+  # Allow inbound HTTP traffic
+  ingress {
+    rule_no    = 100
+    protocol   = "tcp"
+    action     = "allow"
+    cidr_block = "0.0.0.0/0"
+    from_port  = 80
+    to_port    = 80
+  }
+
+  # Allow inbound SSH traffic
+  ingress {
+    rule_no    = 101
+    protocol   = "tcp"
+    action     = "allow"
+    cidr_block = "0.0.0.0/0"
+    from_port  = 22
+    to_port    = 22
+  }
+
+  # Allow all inbound traffic
+  ingress {
+    rule_no    = 102
+    protocol   = "-1"
+    action     = "allow"
+    cidr_block = "0.0.0.0/0"
+    from_port  = 0
+    to_port    = 0
+  }
+
+  # Allow all outbound traffic
+  egress {
+    rule_no    = 100
+    protocol   = "-1"
+    action     = "allow"
+    cidr_block = "0.0.0.0/0"
+    from_port  = 0
+    to_port    = 0
+  }
+}
+
+
 # EC2 User Data Script
 data "template_file" "userdata" {
   template = <<-EOF
@@ -104,15 +169,21 @@ data "template_file" "userdata" {
               yum install -y httpd
               systemctl start httpd
               systemctl enable httpd
+              systemctl enable amazon-ssm-agent
+              systemctl start amazon-ssm-agent
               echo "Hello World from $(hostname -f)" > /var/www/html/index.html
             EOF
 }
+
 # Launch Configuration
 resource "aws_launch_configuration" "web" {
   name          = "web-launch-configuration"
-  image_id      = "ami-0c55b159cbfafe1f0" # Amazon Linux 2 AMI
+  key_name      = "KHT"
+  image_id      = "ami-0b72821e2f351e396" # Amazon Linux 2 AMI
   instance_type = "t2.micro"
   security_groups = [aws_security_group.web.id]
+  iam_instance_profile = aws_iam_instance_profile.ssm_instance_profile.name
+  associate_public_ip_address = true
 
   user_data = data.template_file.userdata.rendered
 
@@ -120,6 +191,13 @@ resource "aws_launch_configuration" "web" {
     create_before_destroy = true
   }
 }
+
+# IAM Instance Profile
+resource "aws_iam_instance_profile" "ssm_instance_profile" {
+  name = "ssm-instance-profile"
+  role = aws_iam_role.ssm_role.name
+}
+
 
 # Auto Scaling Group
 resource "aws_autoscaling_group" "web" {
@@ -162,4 +240,81 @@ resource "aws_lb_listener" "web" {
     type             = "forward"
     target_group_arn = aws_lb_target_group.web.arn
   }
+}
+
+resource "aws_autoscaling_attachment" "asg_attachment" {
+  autoscaling_group_name = aws_autoscaling_group.web.name
+  lb_target_group_arn   = aws_lb_target_group.web.arn
+}
+
+# CloudWatch Alarms
+resource "aws_cloudwatch_metric_alarm" "high_cpu" {
+  alarm_name                = "high-cpu-utilization"
+  comparison_operator       = "GreaterThanThreshold"
+  evaluation_periods        = "2"
+  metric_name               = "CPUUtilization"
+  namespace                 = "AWS/EC2"
+  period                    = "30"
+  statistic                 = "Average"
+  threshold                 = "75"
+  alarm_actions             = [aws_autoscaling_policy.scale_out.arn]
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.web.name
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "low_cpu" {
+  alarm_name                = "low-cpu-utilization"
+  comparison_operator       = "LessThanThreshold"
+  evaluation_periods        = "2"
+  metric_name               = "CPUUtilization"
+  namespace                 = "AWS/EC2"
+  period                    = "30"
+  statistic                 = "Average"
+  threshold                 = "20"
+  alarm_actions             = [aws_autoscaling_policy.scale_in.arn]
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.web.name
+  }
+}
+
+# Auto Scaling Policies
+resource "aws_autoscaling_policy" "scale_out" {
+  name                   = "scale_out"
+  scaling_adjustment     = 1
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = 30
+  autoscaling_group_name = aws_autoscaling_group.web.name
+}
+
+resource "aws_autoscaling_policy" "scale_in" {
+  name                   = "scale_in"
+  scaling_adjustment     = -1
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = 30
+  autoscaling_group_name = aws_autoscaling_group.web.name
+}
+
+# IAM Role
+resource "aws_iam_role" "ssm_role" {
+  name = "ssm-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# IAM Role Policy Attachment
+resource "aws_iam_role_policy_attachment" "ssm_role_policy" {
+  role       = aws_iam_role.ssm_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
