@@ -107,3 +107,17 @@ data "template_file" "userdata" {
               echo "Hello World from $(hostname -f)" > /var/www/html/index.html
             EOF
 }
+# Launch Configuration
+resource "aws_launch_configuration" "web" {
+  name          = "web-launch-configuration"
+  image_id      = "ami-0c55b159cbfafe1f0" # Amazon Linux 2 AMI
+  instance_type = "t2.micro"
+  security_groups = [aws_security_group.web.id]
+
+  user_data = data.template_file.userdata.rendered
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
