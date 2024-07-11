@@ -5,6 +5,8 @@ provider "aws" {
 # VPC
 resource "aws_vpc" "example" {
   cidr_block = "10.0.0.0/16"
+  enable_dns_support   = true
+  enable_dns_hostnames = true
 }
 
 # Subnets
@@ -166,14 +168,19 @@ data "template_file" "userdata" {
   template = <<-EOF
               #!/bin/bash
               yum update -y
+              yum install -y epel-release
+              yum install -y stress
               yum install -y httpd
               systemctl start httpd
               systemctl enable httpd
               systemctl enable amazon-ssm-agent
               systemctl start amazon-ssm-agent
               echo "Hello World from $(hostname -f)" > /var/www/html/index.html
+              # Run stress for 1 minute to simulate high CPU usage
+              stress --cpu 4 --timeout 60
             EOF
 }
+
 
 # Launch Configuration
 resource "aws_launch_configuration" "web" {
