@@ -121,3 +121,17 @@ resource "aws_launch_configuration" "web" {
   }
 }
 
+# Auto Scaling Group
+resource "aws_autoscaling_group" "web" {
+  vpc_zone_identifier = [aws_subnet.private_1.id, aws_subnet.private_2.id, aws_subnet.private_3.id]
+  launch_configuration = aws_launch_configuration.web.id
+  min_size             = 1
+  max_size             = 3
+  desired_capacity     = 1
+
+  tag {
+    key                 = "Name"
+    value               = "web"
+    propagate_at_launch = true
+  }
+}
