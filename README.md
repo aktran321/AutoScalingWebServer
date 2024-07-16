@@ -2,6 +2,8 @@
 
 ## Description
 
+Your online store experiences spikes in traffic throughout the week, causing the site to crash resulting in poor customer experience and loss in profit. To solve this issue, you decide to create a highly available AWS architecture.
+
 This project demonstrates the creation of a highly available web server architecture using Terraform. The architecture is designed to ensure high availability while minimizing costs. Key features include automated scaling based on CPU usage and detailed network configuration.
 
 ## Features
