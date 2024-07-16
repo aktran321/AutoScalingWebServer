@@ -21,11 +21,8 @@ This project demonstrates the creation of a highly available web server architec
 
 ## Installation
 
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/yourusername/your-repo.git
-   cd your-repo
-   ```
+1. **Clone the Repository**
+
 2. **Terraform Commands**
 
 ```
